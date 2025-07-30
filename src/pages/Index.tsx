@@ -58,7 +58,7 @@ const Index = () => {
 
   const callGeminiAPI = async (userMessage: string, context: string = '') => {
     const API_KEY = 'AIzaSyDnwJZAlISIaUvPafK-GIbCiZ0FxeI1Gb4';
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
     const prompt = context 
       ? `Context from uploaded documents: ${context}\n\nUser question: ${userMessage}\n\nPlease provide a helpful response based on the context above and your knowledge.`
