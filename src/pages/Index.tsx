@@ -6,52 +6,47 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Send, 
   Bot, 
   User, 
-  Sparkles, 
-  Upload, 
-  FileText, 
-  Settings,
+  Paperclip,
   MessageCircle,
-  Zap,
-  Brain,
-  Clock
+  X,
+  FileText
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
   timestamp: Date;
-  isTyping?: boolean;
+  files?: { name: string; content: string }[];
 }
 
-interface Document {
-  id: string;
+interface UploadedFile {
   name: string;
   content: string;
-  uploadedAt: Date;
 }
 
 const Index = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: "👋 Welcome to Neural Support! I'm your AI assistant powered by advanced language models. I can help you with any questions using our knowledge base. How can I assist you today?",
+      text: "Hello! I'm your AI customer support assistant. I can help you with any questions and I'll use any documents you upload to provide better answers. How can I help you today?",
       isUser: false,
       timestamp: new Date(),
     }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [activeTab, setActiveTab] = useState('chat');
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -61,13 +56,50 @@ const Index = () => {
     scrollToBottom();
   }, [messages]);
 
-  const simulateAIResponse = async (userMessage: string) => {
+  const callGeminiAPI = async (userMessage: string, context: string = '') => {
+    const API_KEY = 'AIzaSyDnwJZAlISIaUvPafK-GIbCiZ0FxeI1Gb4';
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
+
+    const prompt = context 
+      ? `Context from uploaded documents: ${context}\n\nUser question: ${userMessage}\n\nPlease provide a helpful response based on the context above and your knowledge.`
+      : userMessage;
+
+    try {
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.candidates[0]?.content?.parts[0]?.text || "I'm sorry, I couldn't generate a response.";
+    } catch (error) {
+      console.error('Error calling Gemini API:', error);
+      return "I'm sorry, there was an error processing your request. Please try again.";
+    }
+  };
+
+  const getAIResponse = async (userMessage: string) => {
     setIsTyping(true);
     
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Create context from uploaded files
+    const context = uploadedFiles.map(file => 
+      `File: ${file.name}\nContent: ${file.content}`
+    ).join('\n\n');
     
-    const aiResponse = `I understand you're asking about "${userMessage}". Based on our knowledge base and advanced AI processing, I can help you with that. This is a simulated response that would normally come from your integrated LLM API (OpenAI, Gemini, Claude, etc.). The system will analyze uploaded documents and FAQs to provide contextually relevant answers.`;
+    const aiResponse = await callGeminiAPI(userMessage, context);
     
     const newMessage: Message = {
       id: Date.now().toString(),
@@ -81,19 +113,32 @@ const Index = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() && pendingFiles.length === 0) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: inputValue,
+      text: inputValue || 'Uploaded files',
       isUser: true,
       timestamp: new Date(),
+      files: pendingFiles.length > 0 ? pendingFiles : undefined,
     };
 
     setMessages(prev => [...prev, userMessage]);
+    
+    // Add pending files to uploaded files
+    if (pendingFiles.length > 0) {
+      setUploadedFiles(prev => [...prev, ...pendingFiles]);
+      setPendingFiles([]);
+      toast({
+        title: "Files uploaded",
+        description: `${pendingFiles.length} file(s) added to knowledge base`,
+      });
+    }
+    
+    const messageToSend = inputValue || `I've uploaded ${pendingFiles.length} file(s). Please acknowledge this.`;
     setInputValue('');
     
-    await simulateAIResponse(inputValue);
+    await getAIResponse(messageToSend);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -104,31 +149,39 @@ const Index = () => {
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
+    const files = Array.from(event.target.files || []);
+    
+    files.forEach(file => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const content = e.target?.result as string;
-        const newDoc: Document = {
-          id: Date.now().toString(),
+        const newFile: UploadedFile = {
           name: file.name,
-          content: content.substring(0, 1000) + '...', // Truncate for display
-          uploadedAt: new Date(),
+          content: content.substring(0, 5000), // Limit content length
         };
-        setDocuments(prev => [...prev, newDoc]);
+        setPendingFiles(prev => [...prev, newFile]);
       };
       reader.readAsText(file);
+    });
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
+  const removePendingFile = (index: number) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const TypingIndicator = () => (
-    <div className="flex items-center space-x-2 p-4">
-      <Avatar className="w-8 h-8 neural-glow">
+    <div className="flex items-center space-x-3 p-4">
+      <Avatar className="w-8 h-8">
         <AvatarFallback className="bg-primary text-primary-foreground">
           <Bot className="w-4 h-4" />
         </AvatarFallback>
       </Avatar>
-      <div className="bg-surface rounded-2xl px-4 py-2">
+      <div className="bg-card rounded-lg px-4 py-2 border">
         <div className="flex space-x-1">
           <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
           <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -139,203 +192,155 @@ const Index = () => {
   );
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
-      {/* Animated Background */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-gradient-to-br from-primary/10 via-secondary/5 to-accent/10 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute -bottom-1/2 -right-1/2 w-full h-full bg-gradient-to-tl from-neural-blue/10 via-neural-purple/5 to-neural-pink/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
-      </div>
-
-      <div className="relative z-10 container mx-auto p-4 h-screen flex flex-col">
+    <div className="min-h-screen bg-background p-4">
+      <div className="max-w-4xl mx-auto h-screen flex flex-col">
         {/* Header */}
-        <Card className="mb-6 neural-glow border-0 bg-surface/80 backdrop-blur-xl">
-          <div className="p-6">
+        <Card className="mb-4 border-border/50">
+          <div className="p-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <div className="relative">
-                  <div className="w-12 h-12 neural-gradient rounded-xl flex items-center justify-center floating">
-                    <Brain className="w-6 h-6 text-white" />
-                  </div>
-                  <div className="absolute -top-1 -right-1">
-                    <Sparkles className="w-4 h-4 text-accent animate-pulse" />
-                  </div>
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
+                  <MessageCircle className="w-5 h-5 text-primary-foreground" />
                 </div>
                 <div>
-                  <h1 className="text-3xl font-bold bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent">
-                    Neural Support AI
-                  </h1>
-                  <p className="text-muted-foreground">Advanced Customer Support Assistant</p>
+                  <h1 className="text-xl font-bold">AI Customer Support</h1>
+                  <p className="text-sm text-muted-foreground">
+                    Powered by Gemini AI
+                  </p>
                 </div>
               </div>
               <div className="flex items-center space-x-2">
-                <Badge variant="secondary" className="neural-glow">
-                  <Zap className="w-3 h-3 mr-1" />
-                  AI Powered
+                <Badge variant="secondary">
+                  {uploadedFiles.length} documents
                 </Badge>
-                <Badge variant="outline" className="border-primary/30">
-                  <Clock className="w-3 h-3 mr-1" />
-                  24/7 Available
+                <Badge variant="outline" className="text-green-400 border-green-400/50">
+                  Online
                 </Badge>
               </div>
             </div>
           </div>
         </Card>
 
-        {/* Main Content */}
-        <div className="flex-1 flex gap-6">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1">
-            <TabsList className="grid w-full grid-cols-3 bg-surface/80 backdrop-blur-xl">
-              <TabsTrigger value="chat" className="flex items-center gap-2">
-                <MessageCircle className="w-4 h-4" />
-                Chat
-              </TabsTrigger>
-              <TabsTrigger value="admin" className="flex items-center gap-2">
-                <Settings className="w-4 h-4" />
-                Admin
-              </TabsTrigger>
-              <TabsTrigger value="docs" className="flex items-center gap-2">
-                <FileText className="w-4 h-4" />
-                Knowledge Base
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="chat" className="flex-1 mt-6">
-              <Card className="h-full flex flex-col neural-glow border-0 bg-surface/80 backdrop-blur-xl">
-                {/* Messages Area */}
-                <ScrollArea className="flex-1 p-6">
-                  <div className="space-y-4">
-                    {messages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={cn(
-                          "flex items-start gap-3 message-enter",
-                          message.isUser ? "flex-row-reverse" : "flex-row"
-                        )}
-                      >
-                        <Avatar className={cn(
-                          "w-8 h-8",
-                          message.isUser ? "bg-accent" : "neural-glow"
-                        )}>
-                          <AvatarFallback className={cn(
-                            message.isUser 
-                              ? "bg-accent text-accent-foreground" 
-                              : "bg-primary text-primary-foreground"
-                          )}>
-                            {message.isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-                          </AvatarFallback>
-                        </Avatar>
-                        
-                        <div className={cn(
-                          "max-w-[80%] rounded-2xl px-4 py-3 shadow-lg",
-                          message.isUser
-                            ? "bg-accent text-accent-foreground ml-auto"
-                            : "bg-surface border border-border/50"
-                        )}>
-                          <p className="text-sm leading-relaxed">{message.text}</p>
-                          <p className="text-xs opacity-60 mt-2">
-                            {message.timestamp.toLocaleTimeString()}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+        {/* Chat Area */}
+        <Card className="flex-1 flex flex-col border-border/50">
+          {/* Messages */}
+          <ScrollArea className="flex-1 p-4">
+            <div className="space-y-4">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={cn(
+                    "flex items-start gap-3 message-enter",
+                    message.isUser ? "flex-row-reverse" : "flex-row"
+                  )}
+                >
+                  <Avatar className="w-8 h-8">
+                    <AvatarFallback className={cn(
+                      message.isUser 
+                        ? "bg-accent text-accent-foreground" 
+                        : "bg-primary text-primary-foreground"
+                    )}>
+                      {message.isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                    </AvatarFallback>
+                  </Avatar>
+                  
+                  <div className={cn(
+                    "max-w-[80%] rounded-lg px-3 py-2",
+                    message.isUser
+                      ? "bg-accent text-accent-foreground ml-auto"
+                      : "bg-card border border-border/50"
+                  )}>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
                     
-                    {isTyping && <TypingIndicator />}
-                    <div ref={messagesEndRef} />
+                    {message.files && message.files.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {message.files.map((file, index) => (
+                          <div key={index} className="flex items-center gap-2 text-xs opacity-70">
+                            <FileText className="w-3 h-3" />
+                            <span>{file.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    <p className="text-xs opacity-60 mt-1">
+                      {message.timestamp.toLocaleTimeString()}
+                    </p>
                   </div>
-                </ScrollArea>
+                </div>
+              ))}
+              
+              {isTyping && <TypingIndicator />}
+              <div ref={messagesEndRef} />
+            </div>
+          </ScrollArea>
 
-                <Separator className="bg-border/50" />
+          <Separator className="bg-border/50" />
 
-                {/* Input Area */}
-                <div className="p-6">
-                  <div className="flex gap-3">
-                    <Input
-                      value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
-                      onKeyPress={handleKeyPress}
-                      placeholder="Ask me anything..."
-                      className="flex-1 bg-background/50 border-border/50 focus:border-primary transition-all duration-300 neural-glow"
-                      disabled={isTyping}
-                    />
+          {/* Pending Files Display */}
+          {pendingFiles.length > 0 && (
+            <div className="p-3 bg-muted/30">
+              <div className="text-xs text-muted-foreground mb-2">Files to upload:</div>
+              <div className="flex flex-wrap gap-2">
+                {pendingFiles.map((file, index) => (
+                  <div key={index} className="flex items-center gap-2 bg-card rounded px-2 py-1 text-xs border">
+                    <FileText className="w-3 h-3" />
+                    <span>{file.name}</span>
                     <Button
-                      onClick={handleSendMessage}
-                      disabled={!inputValue.trim() || isTyping}
                       size="icon"
-                      className="neural-gradient hover:scale-105 transition-transform duration-200"
+                      variant="ghost"
+                      className="h-4 w-4"
+                      onClick={() => removePendingFile(index)}
                     >
-                      <Send className="w-4 h-4" />
+                      <X className="w-3 h-3" />
                     </Button>
                   </div>
-                </div>
-              </Card>
-            </TabsContent>
+                ))}
+              </div>
+            </div>
+          )}
 
-            <TabsContent value="admin" className="flex-1 mt-6">
-              <Card className="h-full neural-glow border-0 bg-surface/80 backdrop-blur-xl">
-                <div className="p-6">
-                  <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                    <Upload className="w-5 h-5 text-primary" />
-                    Upload Knowledge Base Documents
-                  </h3>
-                  <div 
-                    className="border-2 border-dashed border-border/50 rounded-lg p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                    <p className="text-lg font-medium mb-2">Drop files here or click to upload</p>
-                    <p className="text-muted-foreground">Support for .txt, .md, .pdf files</p>
-                  </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    onChange={handleFileUpload}
-                    accept=".txt,.md,.pdf"
-                    className="hidden"
-                  />
-                </div>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="docs" className="flex-1 mt-6">
-              <Card className="h-full neural-glow border-0 bg-surface/80 backdrop-blur-xl">
-                <div className="p-6">
-                  <h3 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-primary" />
-                    Uploaded Documents ({documents.length})
-                  </h3>
-                  <ScrollArea className="h-[400px]">
-                    <div className="space-y-3">
-                      {documents.length === 0 ? (
-                        <p className="text-muted-foreground text-center py-8">
-                          No documents uploaded yet. Upload some files in the Admin tab to enhance AI responses.
-                        </p>
-                      ) : (
-                        documents.map((doc) => (
-                          <Card key={doc.id} className="p-4 bg-background/50 border-border/50">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <h4 className="font-medium">{doc.name}</h4>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                  Uploaded {doc.uploadedAt.toLocaleDateString()}
-                                </p>
-                                <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
-                                  {doc.content}
-                                </p>
-                              </div>
-                              <Badge variant="outline" className="border-primary/30">
-                                Active
-                              </Badge>
-                            </div>
-                          </Card>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
+          {/* Input Area */}
+          <div className="p-4">
+            <div className="flex gap-2">
+              <Button
+                size="icon"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                className="shrink-0"
+                disabled={isTyping}
+              >
+                <Paperclip className="w-4 h-4" />
+              </Button>
+              
+              <Input
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Type your message or upload files..."
+                className="flex-1"
+                disabled={isTyping}
+              />
+              
+              <Button
+                onClick={handleSendMessage}
+                disabled={(!inputValue.trim() && pendingFiles.length === 0) || isTyping}
+                className="shrink-0"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+            
+            <input
+              ref={fileInputRef}
+              type="file"
+              onChange={handleFileUpload}
+              accept=".txt,.md,.pdf,.doc,.docx"
+              multiple
+              className="hidden"
+            />
+          </div>
+        </Card>
       </div>
     </div>
   );
