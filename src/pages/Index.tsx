@@ -20,7 +20,9 @@ import {
   Lightbulb,
   Share2,
   Image as ImageIcon,
-  Star
+  Star,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -52,29 +54,60 @@ interface Chat {
   uploadedFiles: UploadedFile[];
 }
 
+// Helper functions for localStorage
+const loadChatsFromLocalStorage = (): Chat[] => {
+  const savedChats = localStorage.getItem('aiSupportChats');
+  if (savedChats) {
+    try {
+      const parsed = JSON.parse(savedChats);
+      // Convert string dates back to Date objects
+      return parsed.map((chat: any) => ({
+        ...chat,
+        date: new Date(chat.date),
+        messages: chat.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }))
+      }));
+    } catch (e) {
+      console.error("Failed to parse saved chats", e);
+      return [];
+    }
+  }
+  return [];
+};
+
+const saveChatsToLocalStorage = (chats: Chat[]) => {
+  localStorage.setItem('aiSupportChats', JSON.stringify(chats));
+};
+
 const Index = () => {
   const [chats, setChats] = useState<Chat[]>(() => {
-    return [{
-      id: '1',
-      title: 'New Conversation',
-      date: new Date(),
-      messages: [{
-        id: '1',
-        text: "Hello! I'm your AI customer support assistant. I can help you with any questions and I'll use any documents you upload to provide better answers. How can I help you today?",
-        isUser: false,
-        timestamp: new Date(),
-      }],
-      uploadedFiles: []
-    }];
+    const savedChats = loadChatsFromLocalStorage();
+    return savedChats.length > 0 
+      ? savedChats 
+      : [{
+          id: '1',
+          title: 'New Conversation',
+          date: new Date(),
+          messages: [{
+            id: '1',
+            text: "Hello! I'm your AI customer support assistant. I can help you with any questions and I'll use any documents you upload to provide better answers. How can I help you today?",
+            isUser: false,
+            timestamp: new Date(),
+          }],
+          uploadedFiles: []
+        }];
   });
-  const [currentChatId, setCurrentChatId] = useState('1');
+  const [currentChatId, setCurrentChatId] = useState(chats[0].id);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [aiModel, setAiModel] = useState('gemini-1.5-flash');
   const [temperature, setTemperature] = useState(0.7);
-  const [hasStartedChat, setHasStartedChat] = useState(false);
+  const [hasStartedChat, setHasStartedChat] = useState(chats[0].messages.length > 1);
   const [suggestions] = useState([
     "How can I reset my password?",
     "What's your refund policy?",
@@ -89,6 +122,11 @@ const Index = () => {
   const currentChat = chats.find(chat => chat.id === currentChatId) || chats[0];
   const messages = currentChat?.messages || [];
   const uploadedFiles = currentChat?.uploadedFiles || [];
+
+  // Save chats to localStorage whenever they change
+  useEffect(() => {
+    saveChatsToLocalStorage(chats);
+  }, [chats]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -397,25 +435,55 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background flex overflow-hidden">
       {/* Sidebar - Desktop */}
-      <div className="hidden md:flex flex-col w-64 border-r border-border/20 bg-background h-screen sticky top-0">
+      <div className={cn(
+        "hidden md:flex flex-col border-r border-border/20 bg-background h-screen sticky top-0 transition-all duration-300 ease-in-out",
+        isSidebarCollapsed ? "w-20" : "w-64"
+      )}>
         {/* Sidebar Header */}
-        <div className="p-4 border-b border-border/20">
-          <div className="flex items-center space-x-2">
-            <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-              <MessageCircle className="w-5 h-5 text-primary" />
-            </div>
-            <h1 className="text-xl font-semibold">AI Support</h1>
-          </div>
+        <div className={cn(
+          "p-4 border-b border-border/20 flex items-center",
+          isSidebarCollapsed ? "justify-center" : "justify-between"
+        )}>
+          {!isSidebarCollapsed ? (
+            <>
+              <div className="flex items-center space-x-2">
+                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <MessageCircle className="w-5 h-5 text-primary" />
+                </div>
+                <h1 className="text-xl font-semibold">AI Support</h1>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="h-8 w-8 hover:bg-muted/50"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+            </>
+          ) : (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setIsSidebarCollapsed(false)}
+              className="h-10 w-10 hover:bg-muted/50"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </Button>
+          )}
         </div>
         
         {/* New Chat Button */}
         <Button 
           variant="ghost" 
-          className="mx-4 mt-4 mb-2 bg-primary/5 hover:bg-primary/10 text-primary"
+          className={cn(
+            "mx-4 mt-4 mb-2 bg-primary/5 hover:bg-primary/10 text-primary",
+            isSidebarCollapsed ? "px-0 justify-center" : "justify-start"
+          )}
           onClick={createNewChat}
         >
-          <Plus className="w-4 h-4 mr-2" />
-          New Chat
+          <Plus className="w-4 h-4" />
+          {!isSidebarCollapsed && <span className="ml-2">New Chat</span>}
         </Button>
         
         {/* Chat History Section */}
@@ -425,15 +493,23 @@ const Index = () => {
               <div key={chat.id} className="relative group">
                 <Button 
                   variant={currentChatId === chat.id ? "secondary" : "ghost"} 
-                  className="w-full justify-start text-sm pr-10 hover:bg-muted/50"
+                  className={cn(
+                    "w-full justify-start text-sm hover:bg-muted/50",
+                    isSidebarCollapsed ? "px-2" : "pr-10",
+                    currentChatId === chat.id ? "bg-muted/50" : ""
+                  )}
                   onClick={() => {
                     setCurrentChatId(chat.id);
                     setHasStartedChat(chat.messages.length > 1);
                   }}
                 >
-                  <span className="truncate">{chat.title}</span>
+                  {isSidebarCollapsed ? (
+                    <span className="truncate">{chat.title.charAt(0)}</span>
+                  ) : (
+                    <span className="truncate">{chat.title}</span>
+                  )}
                 </Button>
-                {chats.length > 1 && (
+                {chats.length > 1 && !isSidebarCollapsed && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -455,10 +531,13 @@ const Index = () => {
         <div className="p-4 border-t border-border/20">
           <Button 
             variant="ghost" 
-            className="w-full justify-start text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            className={cn(
+              "w-full justify-start text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+              isSidebarCollapsed ? "px-0 justify-center" : "justify-start"
+            )}
           >
-            <Settings className="w-4 h-4 mr-2" />
-            Settings
+            <Settings className="w-4 h-4" />
+            {!isSidebarCollapsed && <span className="ml-2">Settings</span>}
           </Button>
         </div>
       </div>
@@ -685,67 +764,74 @@ const Index = () => {
             </div>
           )}
 
-          {/* Input Area */}
+          {/* Input Area - Enhanced like Deepseek */}
           <div className="p-4 border-t border-border/20 bg-background/80 backdrop-blur-sm">
             <div className="relative">
-              <Textarea
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyPress}
-                placeholder="Type your message..."
-                className="min-h-[60px] pr-16 resize-none border border-border/20 focus-visible:ring-1 focus-visible:ring-primary/50 focus:border-primary/50 transition-all"
-                disabled={isTyping}
-                rows={1}
-              />
-              
-              <div className="absolute right-2 bottom-2 flex gap-1">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 hover:bg-muted/50"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isTyping || pendingFiles.length >= 5}
-                      >
-                        <Paperclip className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Attach files</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+              <div className="flex items-center rounded-lg border border-border/20 bg-muted/10 focus-within:ring-1 focus-within:ring-primary/50 focus-within:border-primary/50 transition-all">
+                <Textarea
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  placeholder="Type your message..."
+                  className="min-h-[60px] pr-16 resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+                  disabled={isTyping}
+                  rows={1}
+                />
                 
-                <Button
-                  size="icon"
-                  className="h-8 w-8 bg-primary/90 hover:bg-primary"
-                  onClick={handleSendMessage}
-                  disabled={(!inputValue.trim() && pendingFiles.length === 0) || isTyping}
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
+                <div className="absolute right-2 bottom-10 flex gap-1">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 hover:bg-muted/50 text-muted-foreground"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isTyping || pendingFiles.length >= 5}
+                        >
+                          <Paperclip className="w-4 h-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Attach files</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  
+                  <Button
+                    size="icon"
+                    className={cn(
+                      "h-8 w-8 transition-all",
+                      inputValue.trim() || pendingFiles.length > 0 
+                        ? "bg-primary hover:bg-primary/90 text-white" 
+                        : "bg-muted/50 text-muted-foreground"
+                    )}
+                    onClick={handleSendMessage}
+                    disabled={(!inputValue.trim() && pendingFiles.length === 0) || isTyping}
+                  >
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
+              
+              <div className="text-xs text-muted-foreground mt-2 flex items-center justify-between">
+                <span>Supports text, PDF, Word, and more</span>
+                <Badge variant="outline" className="flex items-center gap-1 bg-muted/50">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/70 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                  </span>
+                  Gemini 1.5 Flash
+                </Badge>
+              </div>
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={handleFileUpload}
+                accept=".txt,.md,.pdf,.doc,.docx,.csv,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif"
+                multiple
+                className="hidden"
+              />
             </div>
-            
-            <div className="text-xs text-muted-foreground mt-2 flex items-center justify-between">
-              <span>Supports text, PDF, Word, and more</span>
-              <Badge variant="outline" className="flex items-center gap-1 bg-muted/50">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/70 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-                </span>
-                Gemini 1.5 Flash
-              </Badge>
-            </div>
-            
-            <input
-              ref={fileInputRef}
-              type="file"
-              onChange={handleFileUpload}
-              accept=".txt,.md,.pdf,.doc,.docx,.csv,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif"
-              multiple
-              className="hidden"
-            />
           </div>
         </div>
       </div>
