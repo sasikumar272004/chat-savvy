@@ -433,7 +433,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex overflow-hidden">
+    <div className="min-h-screen bg-white flex overflow-hidden">
       {/* Sidebar - Desktop */}
       <div className={cn(
         "hidden md:flex flex-col border-r border-border/20 bg-background h-screen sticky top-0 transition-all duration-300 ease-in-out",
